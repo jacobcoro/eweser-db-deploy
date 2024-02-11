@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "e2e/example"
+    "e2e/example",
+    "examples/*"
   ],
   "license": "MIT",
   "scripts": {
@@ -14,6 +15,7 @@
     "copy-readme": "cp README.md packages/db/README.md",
     "build-link:components": "cd packages/examples-components && npm run build; cd ../../; lerna link",
     "build-link:db": "cd packages/db && npm run build; cd ../../; lerna link",
+    "build-auth-server": "cd packages/auth-server && npm run build",
     "build-examples": "run-p build-example:*",
     "build-example:basic": "cd packages/example-basic && npm run build",
     "build-example:editor": "cd packages/example-editor && npm run build",
@@ -27,8 +29,6 @@
     "ci-build": "rm -rf package-lock.json && npm install @esbuild/linux-x64 && npm run build",
     "start-test-server": "cd test-server; docker-compose up -d",
     "start-test-rpc-server": "cd test-rpc-server; node server.js",
-    "install-lerna": "npm install --no-package-lock",
-    "postinstall": "npx lerna bootstrap",
     "run-example-previews": "run-p run-example-preview:*",
     "run-example-preview:basic": "cd packages/example-basic; npm run preview",
     "run-example-preview:editor": "cd packages/example-editor; npm run preview",
@@ -41,7 +41,7 @@
     "@testing-library/cypress": "^9.00",
     "cypress": "^12.9.0",
     "idb": "^7.1.1",
-    "lerna": "^6.6.2",
+    "lerna": "^8.1.2",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.0.3"
   },
