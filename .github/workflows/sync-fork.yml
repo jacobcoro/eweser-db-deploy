@@ -22,7 +22,7 @@ jobs:
 
       - name: Sync with Upstream's v-2 Branch
         run: |
-          git remote add upstream https://github.com/original-owner/original-repository.git
+          git remote add upstream https://github.com/eweser/eweser-db.git
           git fetch upstream
           git checkout main
           git merge upstream/v-2
