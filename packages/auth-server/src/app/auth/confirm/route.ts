@@ -1,12 +1,9 @@
-import { serverSupabase } from '@/lib/supabase/server';
-import { handleServerErrorRedirect } from '@/lib/utils';
+import { verifyOtp } from '@/modules/account/verify-otp';
+import { handleServerErrorRedirect } from '@/shared/utils';
 import { type EmailOtpType } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
 import { type NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
-  const cookieStore = cookies();
-
   const { searchParams } = new URL(request.url);
   const token_hash = searchParams.get('token_hash');
   const type = searchParams.get('type') as EmailOtpType | null;
@@ -17,18 +14,8 @@ export async function GET(request: NextRequest) {
   redirectTo.searchParams.delete('token_hash');
   redirectTo.searchParams.delete('type');
 
-  if (!token_hash || !type) {
-    return handleServerErrorRedirect(
-      new Error('Invalid token_hash or type'),
-      redirectTo
-    );
-  }
-  const supabase = serverSupabase(cookieStore);
+  const { error } = await verifyOtp({ token_hash, type });
 
-  const { error } = await supabase.auth.verifyOtp({
-    type,
-    token_hash,
-  });
   if (error) {
     return handleServerErrorRedirect(error, redirectTo);
   }
