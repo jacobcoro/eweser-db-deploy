@@ -74,30 +74,40 @@ function ProfileViewInner({
   // set up the initial document if it doesn't exist
   useEffect(() => {
     if (!publicProfile) {
+      const newName = `${AUTH_SERVER_DOMAIN} user #${userCount}`;
       const existing = PublicProfile.get('default');
       if (existing) {
-        setPublicProfile(existing);
+        if (!existing.firstName && !privateProfile?.firstName) {
+          PublicProfile.set({
+            ...existing,
+            firstName: newName,
+          });
+        }
+        setPublicProfile({
+          ...existing,
+          firstName: newName,
+        });
         return;
+      } else {
+        PublicProfile.new({ firstName: newName }, 'default');
       }
-      PublicProfile.new(
-        {
-          firstName: `${AUTH_SERVER_DOMAIN} user #${userCount}`,
-        },
-        'default'
-      );
     }
-  }, [publicProfile, PublicProfile, publicProfileRoom.id, userCount]);
+  }, [
+    publicProfile,
+    PublicProfile,
+    publicProfileRoom.id,
+    userCount,
+    privateProfile?.firstName,
+  ]);
 
-  const [firstNameIsPublic, setFirstNameIsPublic] = useState(
-    !!publicProfile?.firstName
-  );
+  const firstNameIsPublic = !!publicProfile?.firstName;
+
   const firstName = firstNameIsPublic
     ? publicProfile?.firstName
     : privateProfile?.firstName;
 
-  const [lastNameIsPublic, setLastNameIsPublic] = useState(
-    !!publicProfile?.lastName
-  );
+  const lastNameIsPublic = !!publicProfile?.lastName;
+
   const lastName = lastNameIsPublic
     ? publicProfile?.lastName
     : privateProfile?.lastName;
@@ -160,7 +170,6 @@ function ProfileViewInner({
                       PublicProfile.set({ ...publicProfile, firstName: '' });
                       PrivateProfile.set({ ...privateProfile, firstName });
                     }
-                    setFirstNameIsPublic(isPublic);
                   }}
                 >
                   <SelectTrigger id="first-name-visibility">
@@ -215,7 +224,6 @@ function ProfileViewInner({
                       PublicProfile.set({ ...publicProfile, lastName: '' });
                       PrivateProfile.set({ ...privateProfile, lastName });
                     }
-                    setLastNameIsPublic(isPublic);
                   }}
                 >
                   <SelectTrigger id="last-name-visibility">
