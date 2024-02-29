@@ -3,7 +3,7 @@ import { Database } from '@eweser/db';
 import type { Documents, Note, Registry, Room } from '@eweser/db';
 import * as config from './config';
 import { v4 as uuid } from 'uuid';
-import { styles, StatusBar, LoginButton } from '@eweser/examples-components';
+import { styles, StatusBar } from '@eweser/examples-components';
 
 // This example shows how to implement a basic login/signup form and a basic note-taking app using @eweser/db
 // The CRUD operations are all done directly on the yjs ydoc using the `Documents` object and its methods returned from `db.getDocuments()`
@@ -19,16 +19,17 @@ const initialRooms: Registry = [
     collectionKey,
     id: roomId,
     name: 'My Notes on Life and Things',
+    // TODO: helper that fills in this metadata to sensible defaults
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     publicAccess: 'private',
     readAccess: [],
     writeAccess: [],
     adminAccess: [],
-    token: '',
-    ySweetUrl: '',
+    token: null,
+    ySweetUrl: null,
     _deleted: false,
-    _ttl: '',
+    _ttl: null,
   },
 ];
 
@@ -87,13 +88,7 @@ const App = () => {
         <>loading...</>
       )}
 
-      {!loggedIn && (
-        <div>
-          Log in to sync your notes to the cloud and other devices
-          <LoginButton loginUrl={loginUrl} />
-        </div>
-      )}
-      <StatusBar db={db} />
+      <StatusBar db={db} loginUrl={loginUrl} />
     </div>
   );
 };

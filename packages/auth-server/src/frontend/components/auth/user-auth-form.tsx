@@ -1,29 +1,40 @@
 'use client';
 
-import * as React from 'react';
+import { useState, useEffect } from 'react';
+import type { ComponentPropsWithoutRef } from 'react';
 
 import { cn } from '../../../shared/utils';
 import { login, signup } from '../../../app/actions';
 import PasswordForm from './password-form';
 import OAuthForm from './oauth-form';
 import type { LoginQueryOptions } from '@eweser/shared';
-import type { ComponentPropsWithoutRef } from 'react';
-import { useState } from 'react';
+import { setLocalStorageLoginQuery } from '../../utils/local-storage';
 
-type UserAuthFormProps = ComponentPropsWithoutRef<'div'> &
-  Partial<LoginQueryOptions> & {
-    className?: string;
-  };
+type UserAuthFormProps = ComponentPropsWithoutRef<'div'> & {
+  className?: string;
+  loginQueryOptions: LoginQueryOptions | null;
+};
 
-// if LoginQueryOptions are defined, then redirect to the access permissions page after login.
-
-export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
+export function UserAuthForm({
+  className,
+  loginQueryOptions,
+  ...props
+}: UserAuthFormProps) {
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
   const [isSignup, setIsSignup] = useState<boolean>(true);
 
   const toggleSignup = () => setIsSignup((prev) => !prev);
-
+  // if LoginQueryOptions are defined, set the redirect info into the localStorage
+  // when login/signup is complete, redirect to the permissions page.
+  // login/signup is completed on the Home page. Or at least that is the first place we can access the frontend to get the localStorage
+  // After submitting the permissions page, clear the localStorage
+  useEffect(() => {
+    // in useEffect to avoid SSR issues
+    if (loginQueryOptions) {
+      setLocalStorageLoginQuery(loginQueryOptions);
+    }
+  }, [loginQueryOptions]);
   return (
     <div className={cn('grid gap-6', className)} {...props}>
       <div className="flex flex-col space-y-2 text-center">

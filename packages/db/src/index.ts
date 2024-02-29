@@ -15,7 +15,7 @@ import type {
   ServerRoom,
 } from '@eweser/shared';
 
-import { collectionKeys } from '@eweser/shared';
+import { collectionKeys, loginOptionsToQueryParams } from '@eweser/shared';
 import { initializeDocAndLocalProvider } from './utils/connection/initializeDoc';
 import { createYjsProvider } from '@y-sweet/client';
 import type { Doc } from 'yjs';
@@ -101,12 +101,13 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
     options: Partial<LoginQueryOptions> & { name: string }
   ): string => {
     const url = new URL(this.authServer);
-    const params: LoginQueryParams = {
+
+    const params: LoginQueryParams = loginOptionsToQueryParams({
       redirect: options?.redirect || window.location.href,
       domain: options?.domain || window.location.host,
-      collections: options?.collections ? options.collections.join('|') : 'all',
+      collections: options?.collections ?? ['all'],
       name: options.name,
-    };
+    });
     Object.entries(params).forEach(([key, value]) => {
       url.searchParams.append(key, value);
     });
@@ -119,6 +120,14 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
     const token = query.get('token');
     if (token && typeof token === 'string') {
       setLocalAccessGrantToken(token);
+    }
+    // remove from url
+    if (window?.location?.search) {
+      const url = new URL(window.location.href);
+      for (const key of url.searchParams.keys()) {
+        url.searchParams.delete(key);
+      }
+      window.history.replaceState({}, '', url.toString());
     }
     return token;
   };
@@ -192,7 +201,9 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
       token: this.getToken() ?? '',
       rooms: this.registry,
     };
-
+    if (!body.token) {
+      return false;
+    }
     const { data: syncResult } =
       await this.serverFetch<RegistrySyncRequestBody>(
         '/access-grant/sync-registry',
@@ -258,6 +269,7 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
           ySweetProvider = provider;
           ydoc = provider.doc as YDoc<any>;
           provider.on('status', (status: any) => {
+            this.emit('roomConnectionChange', existingRoom, status);
             this.debug('ySweetProvider status', status);
           });
           provider.on('sync', (synced: any) => {

@@ -27,6 +27,9 @@ import {
   SelectValue,
 } from '../library/select';
 import { Badge } from '../library/badge';
+import { loginOptionsToPermissionPageUrl } from '../../utils/frontend-url-utils';
+import { getLocalStorageLoginQuery } from '../../utils/local-storage';
+import { useRouter } from 'next/navigation';
 
 export interface ProfileViewProps {
   publicProfileRoom: Room;
@@ -253,6 +256,15 @@ export function ProfileViewFrontend({
   privateProfileRoom,
   ...props
 }: ProfileViewProps) {
+  // if coming to the home page after a login attemp that was setn here from a third party app looking for permissions, redirect to the permissions page
+  const loginQueryOptions = getLocalStorageLoginQuery();
+  const router = useRouter();
+  useEffect(() => {
+    if (loginQueryOptions && router) {
+      router.replace(loginOptionsToPermissionPageUrl(loginQueryOptions));
+    }
+  }, [loginQueryOptions, router]);
+
   return (
     <DatabaseProvider
       initialRooms={[publicProfileRoom, privateProfileRoom]}
