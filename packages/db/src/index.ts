@@ -2,39 +2,33 @@ import type {
   CollectionKey,
   Collections,
   CollectionToDocument,
-  DatabaseEvents,
   EweDocument,
   ProviderOptions,
   Registry,
-  Room,
-  YDoc,
 } from './types';
-import { TypedEventEmitter, collections } from './types';
-import type {
-  LoginQueryOptions,
-  LoginQueryParams,
-  RefreshYSweetTokenRouteResponse,
-  ServerRoom,
-} from '@eweser/shared';
+import { Room, roomToServerRoom } from './room';
+import { collections } from './types';
+import { setupLogger, TypedEventEmitter } from './events';
 
-import { collectionKeys, loginOptionsToQueryParams } from '@eweser/shared';
-import { initializeDocAndLocalProvider } from './utils/connection/initializeDoc';
-import { createYjsProvider } from '@y-sweet/client';
-import type { Doc } from 'yjs';
+import { collectionKeys } from '@eweser/shared';
 import { getDocuments } from './utils/getDocuments';
-import {
-  getLocalAccessGrantToken,
-  getLocalRegistry,
-  setLocalAccessGrantToken,
-  setLocalRegistry,
-} from './utils/localStorageService';
 import { serverFetch } from './utils/connection/serverFetch';
-import { logout, logoutAndClear } from './methods.ts/logout';
-import { login } from './methods.ts/login';
+import { logout, logoutAndClear } from './methods/connection/logout';
+import { login } from './methods/connection/login';
+import type { DatabaseEvents } from './events';
+import { log } from './methods/log';
+import { generateLoginUrl } from './methods/connection/generateLoginUrl';
+import { getAccessGrantTokenFromUrl } from './methods/connection/getAccessGrantTokenFromUrl';
+import { getToken } from './methods/connection/getToken';
+import { getRegistry } from './methods/getRegistry';
+import { loadRoom } from './methods/connection/loadRoom';
+import { refreshYSweetToken } from './methods/connection/refreshYSweetToken';
+import { syncRegistry } from './methods/connection/syncRegistry';
+import { loadRooms } from './methods/connection/loadRooms';
+import { setLocalRegistry } from './utils/localStorageService';
 
 export * from './utils';
 export * from './types';
-
 const defaultRtcPeers = [
   'wss://signaling.yjs.debv',
   'wss://y-webrtc-signaling-eu.herokuapp.com',
@@ -75,250 +69,35 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
   accessGrantToken = '';
 
   webRtcPeers: string[] = defaultRtcPeers;
-  // methods
+
+  // METHODS
+
   // logger/event emitter
-
   logLevel = 2;
-  log: DatabaseEvents['log'] = (level, ...message) => {
-    if (level <= this.logLevel) {
-      this.emit('log', level, ...message);
-    }
-  };
-
+  log = log(this);
   debug: DatabaseEvents['debug'] = (...message) => this.log(0, ...message);
   info: DatabaseEvents['info'] = (...message) => this.log(1, ...message);
   warn: DatabaseEvents['warn'] = (...message) => this.log(2, ...message);
   error: DatabaseEvents['error'] = (...message) => this.log(3, message);
 
-  // connect methods
+  // CONNECT METHODS
 
   serverFetch = serverFetch(this);
-
-  /**
-   *
-   * @param redirect default uses window.location
-   * @param appDomain default uses window.location.hostname
-   * @param collections default 'all', which collections your app would like to have write access to
-   * @returns a string you can use to redirect the user to the auth server's login page
-   */
-  generateLoginUrl = (
-    options: Partial<LoginQueryOptions> & { name: string }
-  ): string => {
-    const url = new URL(this.authServer);
-
-    const params: LoginQueryParams = loginOptionsToQueryParams({
-      redirect: options?.redirect || window.location.href,
-      domain: options?.domain || window.location.host,
-      collections: options?.collections ?? ['all'],
-      name: options.name,
-    });
-    Object.entries(params).forEach(([key, value]) => {
-      url.searchParams.append(key, value);
-    });
-
-    return url.toString();
-  };
-
-  getAccessGrantTokenFromUrl = () => {
-    const query = new URLSearchParams(window?.location?.search ?? '');
-    const token = query.get('token');
-    if (token && typeof token === 'string') {
-      setLocalAccessGrantToken(token);
-    }
-    // remove from url
-    if (window?.location?.search) {
-      const url = new URL(window.location.href);
-      for (const key of url.searchParams.keys()) {
-        url.searchParams.delete(key);
-      }
-      window.history.replaceState({}, '', url.toString());
-    }
-    return token;
-  };
-
-  getToken = () => {
-    if (this.accessGrantToken) {
-      return this.accessGrantToken;
-    }
-    const savedToken = getLocalAccessGrantToken();
-    if (savedToken) {
-      this.accessGrantToken = savedToken;
-      return savedToken;
-    }
-    const urlToken = this.getAccessGrantTokenFromUrl();
-    if (urlToken) {
-      this.accessGrantToken = urlToken;
-      return urlToken;
-    }
-    return null;
-  };
-
-  refreshYSweetToken = async (room: Room<any>): Promise<string | undefined> => {
-    const { data: refresh } =
-      await this.serverFetch<RefreshYSweetTokenRouteResponse>(
-        `/access-grant/refresh-y-sweet-token/${room.id}`
-      );
-
-    if (refresh?.token && refresh.ySweetUrl) {
-      room.ySweetProvider = null; // calling loadRoom with a null ySweetProvider will create a new one
-      await this.loadRoom(room);
-      // this.emit('roomReconnected', loadedRoom);
-    }
-    return refresh?.token;
-  };
-
+  generateLoginUrl = generateLoginUrl(this);
   login = login(this);
   logout = logout(this);
   logoutAndClear = logoutAndClear(this);
 
-  getRegistry = () => {
-    if (this.registry.length > 0) {
-      return this.registry;
-    } else {
-      const localRegistry = getLocalRegistry();
-      if (localRegistry) {
-        this.registry = localRegistry;
-      }
-      return this.registry;
-    }
-  };
+  getAccessGrantTokenFromUrl = getAccessGrantTokenFromUrl();
+  getToken = getToken(this);
 
-  /** sends the registry to the server to check for additions/subtractions on either side */
-  syncRegistry = async () => {
-    // packages/auth-server/src/app/access-grant/sync-registry/route.ts
-    type RegistrySyncRequestBody = {
-      token: string;
-      rooms: Registry;
-    };
-    const body: RegistrySyncRequestBody = {
-      token: this.getToken() ?? '',
-      rooms: this.registry,
-    };
-    if (!body.token) {
-      return false;
-    }
-    const { data: syncResult } =
-      await this.serverFetch<RegistrySyncRequestBody>(
-        '/access-grant/sync-registry',
-        { method: 'POST', body }
-      );
-
-    this.info('syncResult', syncResult);
-
-    const { rooms, token } = syncResult ?? {};
-    if (token && typeof token === 'string') {
-      this.debug('setting new token', token);
-      setLocalAccessGrantToken(token);
-      this.accessGrantToken = token;
-    } else {
-      return false;
-    }
-
-    if (
-      rooms &&
-      typeof rooms === 'object' &&
-      Array.isArray(rooms) &&
-      rooms.length >= 2
-    ) {
-      this.debug('setting new rooms', rooms);
-      setLocalRegistry(rooms);
-      this.registry = rooms;
-    } else {
-      return false;
-    }
-
-    return true;
-  };
-
-  /** first loads the local indexedDB ydoc for the room. if this.useYSweet is true and ySweetTokens are available will also connect to remote. */
-  loadRoom = async (room: ServerRoom) => {
-    if (!room) {
-      throw new Error('room is required');
-    }
-    this.info('loading room', room);
-    const { id: roomId, ySweetUrl, token, collectionKey } = room;
-    if (!roomId) {
-      throw new Error('roomId is required');
-    }
-    const existingRoom = this.collections[collectionKey][roomId];
-    let ydoc = existingRoom?.ydoc;
-    let indexeddbProvider = existingRoom?.indexeddbProvider;
-
-    if (!ydoc || !indexeddbProvider) {
-      const { ydoc: newYDoc, localProvider } =
-        await initializeDocAndLocalProvider(roomId);
-
-      ydoc = newYDoc;
-      indexeddbProvider = localProvider;
-      this.debug('initialized ydoc and localProvider', ydoc, indexeddbProvider);
-    }
-
-    let ySweetProvider = existingRoom?.ySweetProvider;
-    if (!ySweetProvider && token && ySweetUrl && this.useYSweet) {
-      ySweetProvider = createYjsProvider(ydoc as Doc, {
-        url: ySweetUrl,
-        token,
-        docId: roomId,
-      });
-
-      ydoc = ySweetProvider.doc as YDoc<any>;
-      ySweetProvider.on('status', (status: any) => {
-        this.emit('roomConnectionChange', existingRoom, status);
-        // this.debug('ySweetProvider status', status);
-      });
-      ySweetProvider.on('connection-error', async (error: any) => {
-        this.error('ySweetProvider error', error);
-        this.emit('roomConnectionChange', existingRoom, 'disconnected');
-
-        await this.refreshYSweetToken(this.collections[collectionKey][roomId]);
-      });
-      ySweetProvider.on('sync', (synced: boolean) => {
-        this.emit(
-          'roomConnectionChange',
-          existingRoom,
-          synced ? 'connected' : 'disconnected'
-        );
-
-        this.debug('ySweetProvider synced', synced);
-      });
-      this.debug('created ySweetProvider', ySweetProvider);
-      ySweetProvider.connect();
-    }
-
-    if (
-      existingRoom &&
-      existingRoom.ydoc &&
-      existingRoom.indexeddbProvider &&
-      existingRoom.ySweetProvider &&
-      existingRoom.token === token
-    ) {
-      this.debug('room already loaded', existingRoom);
-      return existingRoom;
-    }
-
-    const loadedRoom = (this.collections[collectionKey][roomId] = {
-      ...room,
-      indexeddbProvider,
-      webRtcProvider: null,
-      ySweetProvider,
-      ydoc,
-    });
-    this.emit('roomLoaded', loadedRoom);
-    return loadedRoom;
-  };
-
-  loadRooms = async (rooms: Registry) => {
-    const loadedRooms = [];
-    this.debug('loading rooms', rooms);
-    for (const room of rooms) {
-      const loadedRoom = await this.loadRoom(room);
-      loadedRooms.push(loadedRoom);
-    }
-    this.debug('loaded rooms', loadedRooms);
-    this.emit('roomsLoaded', loadedRooms);
-  };
+  refreshYSweetToken = refreshYSweetToken(this);
+  loadRoom = loadRoom(this);
+  loadRooms = loadRooms(this);
+  syncRegistry = syncRegistry(this);
 
   // util methods
+  getRegistry = getRegistry(this);
 
   // collection methods
   getDocuments = getDocuments(this);
@@ -333,12 +112,23 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
   ): Room<CollectionToDocument[T]>[] {
     return Object.values(this.collections[collectionKey]);
   }
-  newRoom = <_T extends EweDocument>() => {
-    //TODO: implement newRoom
-    // remember that new rooms must be added to the registry and then synced with the auth server
+  /**
+   * new rooms must be added to the registry and then synced with the auth server
+   * Note: If your app does not have access privileges to the collection, the room won't be synced server-side.
+   */
+  newRoom = <T extends EweDocument>(options: Room<T>) => {
+    const room = new Room(options);
+    this.collections[room.collectionKey][room.id] = room;
+    const serverRoom = roomToServerRoom(room);
+    this.registry.push(serverRoom);
+    setLocalRegistry(this.registry);
     if (this.online) {
-      this.syncRegistry(); // locally added rooms need to be synced to the auth server.
-      // if currently offline and doesnt sync here, it should sync when the room is connected
+      this.syncRegistry();
+    } else {
+      // const online = checkOnline();
+      // if(online){
+      //   this.syncRegistry()
+      // }
     }
   };
 
@@ -377,25 +167,7 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
       }
     }
 
-    if (options.logLevel) {
-      this.logLevel = options.logLevel;
-    }
-    this.on('log', (level, ...message) => {
-      switch (level) {
-        case 0:
-          // eslint-disable-next-line no-console
-          return console.info(...message);
-        case 1:
-          // eslint-disable-next-line no-console
-          return console.log(...message);
-        case 2:
-          // eslint-disable-next-line no-console
-          return console.warn(...message);
-        case 3:
-          // eslint-disable-next-line no-console
-          return console.error(...message);
-      }
-    });
+    setupLogger(this, options.logLevel);
     this.debug('Database created with options', options);
 
     this.registry = this.getRegistry() || [];

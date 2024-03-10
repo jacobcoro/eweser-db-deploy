@@ -1,8 +1,8 @@
-import type { Database } from '..';
+import type { Database } from '../..';
 import {
   clearLocalAccessGrantToken,
   clearLocalRegistry,
-} from '../utils/localStorageService';
+} from '../../utils/localStorageService';
 export const logout =
   (db: Database) =>
   /**
@@ -31,7 +31,7 @@ export const logoutAndClear =
     db.logout();
     for (const collectionKey of db.collectionKeys) {
       for (const room of db.getRooms(collectionKey)) {
-        room.indexeddbProvider?.destroy();
+        room.indexedDbProvider?.destroy();
       }
     }
     db.registry = [];
