@@ -10,11 +10,6 @@ import { Room, roomToServerRoom } from './room';
 import { collections } from './types';
 import { setupLogger, TypedEventEmitter } from './events';
 
-import type {
-  CreateRoomInviteBody,
-  CreateRoomInviteResponse,
-  RoomAccessType,
-} from '@eweser/shared';
 import { collectionKeys } from '@eweser/shared';
 import { getDocuments } from './utils/getDocuments';
 import { serverFetch } from './utils/connection/serverFetch';
@@ -31,6 +26,7 @@ import { refreshYSweetToken } from './methods/connection/refreshYSweetToken';
 import { syncRegistry } from './methods/connection/syncRegistry';
 import { loadRooms } from './methods/connection/loadRooms';
 import { setLocalRegistry } from './utils/localStorageService';
+import { generateShareRoomLink } from './methods/connection/generateShareRoomLink';
 
 export * from './utils';
 export * from './types';
@@ -137,47 +133,7 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
     }
   };
 
-  generateShareRoomLink = async ({
-    roomId,
-    invitees,
-    redirectUrl,
-    redirectQueries,
-    expiry,
-    accessType,
-  }: {
-    roomId: string;
-    invitees?: string[];
-    redirectUrl?: string;
-    redirectQueries?: Record<string, string>;
-    expiry?: string;
-    accessType: RoomAccessType;
-  }) => {
-    const body: CreateRoomInviteBody = {
-      roomId,
-      invitees: invitees || [],
-      redirect: redirectUrl || window.location.href.split('?')[0],
-      redirectQueries,
-      expiry:
-        expiry || new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString(),
-      accessType,
-    };
-    const { error, data } = await this.serverFetch<CreateRoomInviteResponse>(
-      '/access-grant/create-room-invite',
-      {
-        body,
-        method: 'POST',
-      }
-    );
-    if (error) {
-      this.error('Error creating room invite', error);
-      return JSON.stringify(error);
-    }
-    if (!data?.link) {
-      return 'Error creating room invite';
-    }
-
-    return data.link;
-  };
+  generateShareRoomLink = generateShareRoomLink(this);
 
   constructor(optionsPassed?: DatabaseOptions) {
     super();
