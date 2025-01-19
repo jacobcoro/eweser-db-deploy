@@ -1,4 +1,5 @@
 import type {
+  Collection,
   CollectionKey,
   Collections,
   CollectionToDocument,
@@ -13,7 +14,7 @@ import { collections } from './types';
 import { setupLogger, TypedEventEmitter } from './events';
 
 import type { UpdateRoomPostBody, UpdateRoomResponse } from '@eweser/shared';
-import { collectionKeys } from '@eweser/shared';
+import { collectionKeys, wait } from '@eweser/shared';
 import { getDocuments } from './utils/getDocuments';
 import { serverFetch } from './utils/connection/serverFetch';
 import { logout, logoutAndClear } from './methods/connection/logout';
@@ -44,6 +45,7 @@ import { pollConnection } from './utils/connection/pollConnection';
 import type { Doc } from 'yjs';
 import type { WebrtcProvider } from 'y-webrtc';
 import { newRoom } from './methods/newRoom';
+import { isReadable } from 'stream';
 
 export * from './utils';
 export * from './types';
@@ -71,6 +73,7 @@ export interface DatabaseOptions {
   initialRooms?: Omit<NewRoomOptions<EweDocument>, 'db'>[];
   /** a polyfill for localStorage for react native apps */
   localStoragePolyfill?: LocalStoragePolyfill;
+  pollForStatus?: boolean;
 }
 
 export class Database extends TypedEventEmitter<DatabaseEvents> {
@@ -80,6 +83,8 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
   online = false;
   isPolling = false;
   offlineOnly = false;
+  /** these rooms will be synced for one second and then disconnected sequentially. Remove the id from this array and the next iteration will not sync that room when it reaches it*/
+  collectionKeysForRollingSync: CollectionKey[] = [];
 
   /** set to false before `db.loginWithToken()` so that offline-first mode is the default, and it upgrades to online sync after login with token */
   useYSweet = false;
@@ -146,6 +151,12 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
     return Object.values(this.collections[collectionKey]);
   }
 
+  allRooms() {
+    return Object.values(this.collections).flatMap(
+      (collection: Collection<any>) => Object.values(collection)
+    );
+  }
+
   newRoom = newRoom(this);
 
   renameRoom = async (room: Room<any>, newName: string) => {
@@ -179,17 +190,64 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
   generateShareRoomLink = generateShareRoomLink(this);
   pingServer = pingServer(this);
 
-  // Temp docs. These are used for collaborative editing, or for rich-text editors that require a full yDoc passed to the editor. It is recommended in these cases to use a temporary yDoc only used for the session (if that document is open in both apps), then have debounced updates to the actual (ex. Notes) document, saved in cross platform compatible markdown.
-  tempDocs: {
-    [eweserDocRef: string]: {
-      doc: Doc;
-      provider?: WebrtcProvider;
-      awareness?: any;
-    };
-  } = {};
+  /** Because we can't have more than 10 rooms open (connected to ySweet) at one time, we can do a rollingSync of all rooms where we briefly connect them, one at a time, let them sync and then disconnect */
+  async rollingSync() {
+    while (true) {
+      console.log('rollingSync', this.collectionKeysForRollingSync);
+
+      for (const key of this.collectionKeysForRollingSync) {
+        for (const room of this.getRooms(key)) {
+          if (room.connectionStatus !== 'disconnected') {
+            this.debug(
+              'rollingSync skipping room',
+              key,
+              room.name,
+              room.name,
+              room.id
+            );
+            continue;
+          }
+          this.debug('rollingSync syncing room', key, room.name, room.id);
+          await room.load();
+          await wait(5000);
+          room.disconnect();
+        }
+      }
+      await wait(5000);
+    }
+  }
+
+  statusListener() {
+    const allRooms = this.allRooms();
+    const connectedRooms = allRooms
+      .filter((r) => r.connectionStatus === 'connected')
+      .map((r) => r.id);
+    const connectingRooms = allRooms
+      .filter((r) => r.connectionStatus === 'connecting')
+      .map((r) => r.id);
+    this.emit('status', {
+      db: this,
+      online: this.online,
+      hasToken: !!this.accessGrantToken,
+      allRoomsCount: allRooms.length,
+      connectedRoomsCount: connectedRooms.length,
+      connectedRooms,
+      connectingRooms,
+      connectingRoomsCount: connectingRooms.length,
+    });
+  }
+  /** useful for debugging or less granular event listening */
+  pollForStatus(intervalMs = 1000) {
+    setInterval(() => {
+      this.statusListener();
+    }, intervalMs);
+  }
 
   constructor(optionsPassed?: DatabaseOptions) {
     super();
+    if (optionsPassed?.pollForStatus) {
+      this.pollForStatus();
+    }
     const options = optionsPassed || {};
     this.localStoragePolyfill = options.localStoragePolyfill || localStorage;
     if (options.authServer) {
@@ -231,6 +289,7 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
 
     this.registry = this.getRegistry() || [];
 
+    let initializedRooms = [];
     if (options.initialRooms) {
       const registryRoomIds = this.registry.map((r) => r.id);
       for (const room of options.initialRooms) {
@@ -239,10 +298,11 @@ export class Database extends TypedEventEmitter<DatabaseEvents> {
         }
         const registryRoom = roomToServerRoom(this.newRoom<any>(room));
         this.registry.push(registryRoom);
+        initializedRooms.push(registryRoom);
       }
+      console.log('initializedRooms', initializedRooms);
+      this.loadRooms(initializedRooms);
     }
-
-    // For now load all registry rooms on start, but in the future might need to change this to limit how many ySweet connections are created on start.
-    this.loadRooms(this.registry);
+    this.rollingSync();
   }
 }
