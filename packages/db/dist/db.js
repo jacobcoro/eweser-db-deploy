@@ -2518,7 +2518,7 @@ class Room extends TypedEventEmitter {
       this.ydoc = options.ydoc;
     }
     this.getDocuments = () => getDocuments(this.db)(this);
-    this.load = () => this.db.loadRoom(this);
+    this.load = (remoteLoadOptions) => this.db.loadRoom(this, remoteLoadOptions);
   }
 }
 function roomToServerRoom(room) {
@@ -2849,7 +2849,7 @@ const syncRegistry = (db) => (
     return true;
   }
 );
-const loadRooms = (db) => async (rooms, staggerMs = 1e3) => {
+const loadRooms = (db) => async (rooms, loadRemotes = false, staggerMs = 1e3) => {
   var _a, _b;
   const loadedRooms = [];
   db.debug("loading rooms", rooms);
@@ -2859,6 +2859,9 @@ const loadRooms = (db) => async (rooms, staggerMs = 1e3) => {
   }
   db.debug("loaded rooms", loadedRooms);
   db.emit("roomsLoaded", loadedRooms);
+  if (!loadRemotes) {
+    return;
+  }
   const remoteLoadedRooms = [];
   let isFirstRoom = true;
   for (const room of rooms) {
@@ -3083,9 +3086,9 @@ class Database extends TypedEventEmitter {
         }
         initializedRooms.push(registryRoom);
       }
-      console.log("initializedRooms", initializedRooms);
-      this.loadRooms(initializedRooms);
+      this.loadRooms(initializedRooms, true);
     }
+    this.loadRooms(this.registry);
     this.pollForRegistrySync();
     this.rollingSync();
     this.emit("initialized");
